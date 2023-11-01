@@ -1,4 +1,5 @@
 # 通过逻辑回归完成二分类任务
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,8 +34,17 @@ def grad(x, y, r):
     return -np.dot(x.T, (r - y)) / x.shape[0]
 
 
-def accuracy(y_pred, y_test):
-    return np.mean(y_pred == y_test)
+def evaluate(x, y, w, b, s):
+    y_pred = sigmoid(x, w, b)
+    for j, i in enumerate(y_pred):
+        if i < 0.5:
+            y_pred[j] = 0
+        else:
+            y_pred[j] = 1
+
+    accuracy = np.mean(y_pred == y)
+    print(s, accuracy)
+    return accuracy
 
 
 def gradientdescent(x, r):
@@ -43,6 +53,8 @@ def gradientdescent(x, r):
     iteration = 100000  # number of iteration
     learning_reta = 0.0001  # learning rate
     loss_v = []  # loss value
+    evaluate_train_v = []  # train accuracy
+    evaluate_test_v = []  # test accuracy
     i = 0  # iteration time
     while True:
         y = sigmoid(x, w, b)
@@ -53,34 +65,40 @@ def gradientdescent(x, r):
         # 记录 loss
         l = loss(r, y)
         loss_v.append(l)
-        if i % 10 == 0:
+
+        # 每迭代 1000 次，输出一次 loss、记录对准确度的预测
+        if i % 1000 == 0:
             print('iteration: ', i, ' loss: ', l)
+            evaluate_test_v.append(evaluate(X_test, Y_test, w, b, 'test accuracy: '))
+            evaluate_train_v.append(evaluate(X_train, Y_train, w, b, 'train accuracy: '))
 
         # 终止条件
         # 1. 迭代次数达到上限
-        # if i == iteration:
-        #     break
+        if i == iteration:
+            break
         # 2. loss 收敛
         #    为了防止 loss 的震荡，l 与 loss_v[i - 10] 进行比较
-        #    如果 loss 的变化小于 0.0001，则认为 loss 收敛
-        if i > 10 and abs(l - loss_v[i - 10]) < 0.0001:
-            break
+        #    如果 loss 的变化小于 0.00001，则认为 loss 收敛
+        # if i > 10 and abs(l - loss_v[i - 10]) < 0.00001:
+        #     break
 
         i += 1
-    return w, b, loss_v
+    return w, b, loss_v, evaluate_train_v, evaluate_test_v
 
 
-w, b, loss_v = gradientdescent(X_train, Y_train)
-y_pred = sigmoid(X_test, w, b)
-for j, i in enumerate(y_pred):
-    if i < 0.5:
-        y_pred[j] = 0
-    else:
-        y_pred[j] = 1
-
-print('test accuracy', accuracy(y_pred, Y_test))
+start_time = time.time()
+w, b, loss_v, evaluate_train_v, evaluate_test_v = gradientdescent(X_train, Y_train)
+end_time = time.time()
+print('time: ', end_time - start_time)
 
 plt.plot(range(len(loss_v)), loss_v)
 plt.xlabel('iteration')
 plt.ylabel('loss')
+plt.show()
+
+plt.plot(range(len(evaluate_train_v)), evaluate_train_v, label='train')
+plt.plot(range(len(evaluate_test_v)), evaluate_test_v, label='test')
+plt.xlabel('iteration')
+plt.ylabel('accuracy')
+plt.legend()
 plt.show()
