@@ -98,6 +98,7 @@ plt.show()
 
 plt.plot(range(len(evaluate_train_v)), evaluate_train_v, label='train')
 plt.plot(range(len(evaluate_test_v)), evaluate_test_v, label='test')
+plt.title('Logistic Regression')
 plt.xlabel('iteration')
 plt.ylabel('accuracy')
 plt.legend()
