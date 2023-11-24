@@ -27,9 +27,9 @@ if __name__ == '__main__':
                         help='input batch size for training')
     parser.add_argument('--dev_batch_size', type=int, default=8,
                         help='input batch size for development')
-    parser.add_argument('--num_epochs_train', type=int, default=16,
+    parser.add_argument('--num_epochs_train', type=int, default=10,
                         help='number of epochs to train')
-    parser.add_argument('--max_seq_length', type=int, default=256,
+    parser.add_argument('--max_seq_length', type=int, default=48,
                         help='maximum sequence length of samples in a batch for training')
     parser.add_argument('--lr', type=float, default=2e-5,
                         help='learning rate')
@@ -55,14 +55,14 @@ if __name__ == '__main__':
         "--restore_training", action="store_true", help="restore training if a saved checkopint exists"
     )
     parser.add_argument(
-        "--with_wandb", action="store_true", help="Train with wandb tracking."
+        "--with_wandb", type=bool, default=True, help="whether to use wandb"
     )
 
     args = parser.parse_args()
     logger.info(f"args: {args}")
     dataset_folder = f"dataset/{args.dataset_name}/json/"
     assert args.model_select in MODEL_MAP.keys(), (f"model has to be in {MODEL_MAP.keys()}")
-    output_path = f"model/{args.model_select}_fine_tuned_coder"
+    output_path = f"model/{args.model_select}_fine_tuned_coder_1"
     logger.info("{} for dataset in: {}".format(output_path, dataset_folder))
     logger.info(
         f"*****************model select: {args.model_select} for code generation using dataset: {args.dataset_name}******************")
@@ -102,4 +102,7 @@ if __name__ == '__main__':
                                  data_loader_shuffle=True,
                                  wandb_config=args if args.with_wandb else None)
     # start training
-    model_trainer.train()
+    # model_trainer.train()
+    # Output args
+    args = parser.parse_args()
+    logger.info(f"args: {args}")

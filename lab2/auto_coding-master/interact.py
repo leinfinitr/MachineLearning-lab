@@ -5,7 +5,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Params')
-    parser.add_argument('--model_path', type=str, default="model/gpt2_medium_fine_tuned_coder",
+    parser.add_argument('--model_path', type=str, default="model/distilgpt2_fine_tuned_coder",
                         help='the path to load fine-tuned model')
     parser.add_argument('--max_length', type=int, default=128,
                         help='maximum length for code generation')

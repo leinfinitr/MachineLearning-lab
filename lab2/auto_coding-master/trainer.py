@@ -360,8 +360,13 @@ class ModelTrainer():
         epoch_loss = 0.0
 
         self.model.zero_grad()
+        # 首先，初始化epoch的步数（epoch_steps）和损失（epoch_loss）为0，并清空模型的梯度（self.model.zero_grad()）。
+
         for step, data in enumerate(
                 tqdm(self._train_dataloader, desc="training", total=self._steps_per_epoch * self.accumulation_steps)):
+            # 然后，对训练数据进行迭代，使用enumerate函数遍历数据加载器（self._train_dataloader）。
+            # tqdm用于在终端显示进度条，desc参数设置进度条的描述为"training"，
+            # total参数设置总的迭代次数为self._steps_per_epoch * self.accumulation_steps。
 
             self.model.train()
             if data["labels"] != "skip-device":
@@ -372,12 +377,21 @@ class ModelTrainer():
                         input[idx].update(labels)
             else:
                 input = data["features"]
+            # 在每个步骤中，将模型设置为训练模式（self.model.train()）。
+            # 然后，检查数据中是否存在标签（data["labels"] != "skip-device"）。
+            # 如果存在标签，则将输入数据（input）和标签数据（labels）移到指定设备（self._device）。
+            # 如果标签是一个字典，则将标签添加到输入数据中。
+            # 如果数据中没有标签，则将输入数据设置为data["features"]。
+
             loss_value, _ = self.model(input)
 
             if self._n_gpu > 1:
                 loss_value = loss_value.mean()
             if self.accumulation_steps > 1:
                 loss_value = loss_value / self.accumulation_steps
+            # 计算模型对输入数据的输出（loss_value）。
+            # 如果使用多个GPU进行训练（self._n_gpu > 1），则对损失值进行平均。
+            # 如果使用梯度累积（self.accumulation_steps > 1），则将损失值除以累积步数。
 
             if self._fp16:
                 try:
@@ -392,17 +406,25 @@ class ModelTrainer():
                 loss_value.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._max_grad_norm)
             epoch_loss += loss_value
+            # 根据是否启用混合精度训练（self.fp16），计算并反向传播损失值（loss_value）。
+            # 如果启用混合精度训练，使用Apex库（需要安装）对损失值进行缩放（amp.scale_loss）和反向传播。
+            # 然后，使用梯度裁剪（torch.nn.utils.clip_grad_norm）限制梯度的大小，以避免梯度爆炸。
+            # 最后，将损失值添加到epoch_loss中。
 
             if (step + 1) % self.accumulation_steps == 0:
-
                 self._optimizer.step()
                 self._scheduler.step()
                 self.model.zero_grad()
 
                 epoch_steps += 1
                 total_global = epoch_steps + global_steps
+                # 如果达到了累积步数（self.accumulation_steps），则进行梯度更新。
+                # 调用优化器的step方法（self._optimizer.step()）执行梯度更新，并调用学习率调度器的step方法（self._scheduler.step()）更新学习率。
+                # 然后清空模型的梯度（self.model.zero_grad()）。增加epoch步数（epoch_steps），计算总的全局步数（total_global）。
 
                 if self._evaluation_steps > 0 and (total_global) % self._evaluation_steps == 0:
+                    # 如果设置了评估步数（self._evaluation_steps > 0），并且当前步数是评估步数的倍数，则进行模型评估。
+
                     dev_loss, eval_scores = self._dev_eval_in_training(epoch, epoch_steps)
                     logger.info("   ***** Evaluation report *****")
                     logger.info(f"  Output path (short): {self.output_path}")
@@ -429,6 +451,7 @@ class ModelTrainer():
                         logger.info(f"  dev_loss = {dev_loss:.6f}\t||\t dev_eval_scores = {eval_scores}")
                     else:
                         logger.info(f"  dev_eval_scores = {eval_scores}")
+                    # 进行模型评估，并获取开发集的损失（dev_loss）和评估指标（eval_scores）。然后，打印评估报告的各种信息，如输出路径、早停策略、评估步数、最佳评估指标分数等。
 
                     train_loss = epoch_loss / epoch_steps
                     logger.info(f"  train_loss = {train_loss}")
@@ -446,6 +469,8 @@ class ModelTrainer():
                                        f"best_score_for_{self._dev_evaluator.early_stop_on}": self._best_score,
                                        "lr": self._scheduler.get_lr()[0]},
                                       step=total_global)
+                    # 计算平均训练损失（train_loss），并将其记录到日志中。
+                    # 如果使用了wandb（Weights & Biases）库，并且配置了wandb_config，则将训练损失、开发集损失、最佳评估指标分数和学习率记录到wandb中。
 
                     for key, value in eval_scores.items():
                         if is_wandb_available() and self.wandb_config != None:
@@ -462,6 +487,10 @@ class ModelTrainer():
                         logger.info(
                             f"  Continuous {self.early_stop} evaluation steps without loss reduction, so early stopped...")
                         sys.exit(0)
+            # 将评估指标的值记录到TensorBoard中，使用TensorBoard写入器（self._tb_writer）。
+            # 同时，将学习率、开发集损失和训练损失记录到TensorBoard中。
+            # 达到早停策略中设置的停止次数（self._early_stop_count >= self.early_stop），即开发集的损失在连续的评估步骤中没有减少，就会触发早停策略。
+            # 在这种情况下，程序记录日志信息，指示连续的评估步骤没有减少损失，并使用sys.exit(0)退出程序。
 
         return epoch_loss, epoch_steps
 
