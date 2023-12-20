@@ -23,11 +23,15 @@
 
 ##### 调用预训练CNN搭建模型
 
-使用预训练的ResNet152模型作为卷积层，搭建CNN-LSTM模型。
+使用预训练的ResNet152模型作为卷积层，搭建CNN-LSTM模型，即 PretrainedConvLstm.py 中的模型。
 
 ##### 使用自行定义的普通CNN搭建模型
 
-自行搭建了一个由卷积层、池化层、全连接层和一个LSTM层组成的CNN-LSTM模型。
+自行搭建了一个由卷积层、池化层、全连接层和一个LSTM层组成的CNN-LSTM模型，即 ConvLstm.py 中的模型。
+
+##### 使用自定义的ResNet和LSTM构建模型
+
+自行搭建了一个由自定义的ResNet和LSTM层组成的CNN-LSTM模型，即 ResNetLstm.py 中的模型。
 
 #### 3. 定义评估函数
 
@@ -45,11 +49,18 @@
 
 调用评估函数评估模型的训练结果，并生成可视化图表。
 
+### 辅助代码
+
+- LSTM.py：定义了通用的LSTM模型。
+- ConvLstm.py、PretrainedConvLstm.py、ResNetLstm.py：定义了三种模型。
+- classify.py：调用训练结果模型对测试集进行分类。
+- export_model.py：将训练结果模型导出为 ONNX 格式，用于生成可视化模型结构图。
+
 ## 系统设计
 
 ### 模型设计
 
-两种模型的 LSTM 结构均相同，使用 torch.nn.LSTM 搭建，其主要代码和函数解释如下：
+三种模型的 LSTM 结构均相同，使用 torch.nn.LSTM 搭建，其主要代码和函数解释如下：
 
 ``` python
 class Lstm(nn.Module):
@@ -135,8 +146,8 @@ class PretrainedConvLstm(nn.Module):
 
 #### 自行定义的普通CNN的模型设计
 
-自行定义的普通 CNN 使用 4 层 torch.nn.Conv2d、torch.nn.ReLU、torch.nn.MaxPool2d 和 1 层 torch.nn.Linear 搭建，将其输出维度设置为
-LSTM 的输入维度。模型其余结构与调用预训练 CNN 的模型相同。
+自行定义的普通 CNN 使用 4 层 torch.nn.Conv2d、torch.nn.ReLU、torch.nn.MaxPool2d 和 1 层torch.nn.Linear 搭建，将其输出维度设置为LSTM
+的输入维度。模型其余结构与调用预训练 CNN 的模型相同。
 
 其主要代码和函数解释如下：
 
@@ -151,27 +162,27 @@ class Conv(nn.Module):
         super(Conv, self).__init__()
         self.conv_model = nn.Sequential(
             # 输入维度：(batch_size, 3, 128, 128)
-            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=6, stride=2, padding=2),
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=6, stride=2, padding=2),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            # 输出维度：(batch_size, 64, 32, 32)
+            # 输出维度：(batch_size, 16, 32, 32)
 
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            # 输出维度：(batch_size, 64, 16, 16)
+            # 输出维度：(batch_size, 32, 16, 16)
 
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=4, stride=2, padding=2), 
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2, padding=1), 
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            # 输出维度：(batch_size, 64, 8, 8)
+            # 输出维度：(batch_size, 64, 4, 4)
             
             nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            # 输出维度：(batch_size, 64, 4, 4)
+            # 输出维度：(batch_size, 64, 2, 2)
         )
-        self.fc = nn.Linear(64 * 4 * 4, latent_dim)
+        self.fc = nn.Linear(64 * 2 * 2, latent_dim)
 
     def forward(self, x):
         batch_size, time_steps, channel_x, height, width = x.shape
@@ -211,6 +222,132 @@ class ConvLstm(nn.Module):
         output = self.output_layer(lstm_output)
         return output
 ```
+
+模型结构图如下：
+
+![](result/ConvLstm.png)
+
+#### 自定义的ResNet和LSTM构建模型设计
+
+当前在图像分类任务上表现较好的CNN模型之一是ResNet（Residual Network）。ResNet通过引入残差连接（residual
+connection）解决了深层网络训练过程中的梯度消失和表示瓶颈问题。因此自定义搭建了一个基于ResNet的ResNetLSTM模型用于视频分类任务。
+
+其主要代码和函数解释如下：
+
+``` python
+class ResidualBlock(nn.Module):
+    """
+    定义ResNet的残差块。该残差块包含两个卷积层，每个卷积层后面跟着一个批归一化层。
+    :param in_channels: 输入的通道数
+    :param out_channels: 输出的通道数
+    :param stride: 卷积的步长，默认为1
+    """
+
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, 
+                               stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, 
+                               stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out += self.shortcut(residual)
+        out = self.relu(out)
+        return out
+
+
+class ResNet(nn.Module):
+    """
+    定义ResNet模型，由多个残差块组成。
+    :param latent_dim: 输出的特征维度
+    """
+
+    def __init__(self, latent_dim):
+        super(ResNet, self).__init__()
+        self.in_channels = 8
+        self.conv1 = nn.Conv2d(3, 8, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(8)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = self.make_layer(8, 2)
+        self.layer2 = self.make_layer(16, 2, stride=2)
+        self.layer3 = self.make_layer(32, 2, stride=2)
+        self.layer4 = self.make_layer(64, 2, stride=2)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(64, latent_dim)
+
+    def make_layer(self, out_channels, num_blocks, stride=1):
+        layers = []
+        layers.append(ResidualBlock(self.in_channels, out_channels, stride))
+        self.in_channels = out_channels
+        for _ in range(1, num_blocks):
+            layers.append(ResidualBlock(out_channels, out_channels))
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        batch_size, time_steps, channel_x, height, width = x.shape
+        conv_input = x.view(batch_size * time_steps, channel_x, height, width)
+        x = self.conv1(conv_input)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+        
+class ResNetLstm(nn.Module):
+    """
+    使用自定义的ResNet和LSTM构建模型
+    :param latent_dim: LSTM的输入维度
+    :param hidden_size: LSTM的隐藏层维度
+    :param lstm_layers: LSTM的层数
+    :param bidirectional: LSTM是否为双向
+    :param n_class: 分类的类别数
+    """
+
+    def __init__(self, latent_dim, hidden_size, lstm_layers, bidirectional, n_class):
+        super(ResNetLstm, self).__init__()
+        self.conv_model = ResNet(latent_dim=latent_dim)
+        self.Lstm = Lstm(latent_dim, hidden_size, lstm_layers, bidirectional)
+        self.output_layer = nn.Sequential(
+            nn.Linear(2 * hidden_size if bidirectional == True else hidden_size, n_class),
+            nn.Softmax(dim=-1)
+        )
+
+    def forward(self, x):
+        batch_size, time_steps, channel_x, height, width = x.shape
+        conv_input = x.view(batch_size, time_steps, channel_x, height, width)
+        conv_output = self.conv_model(conv_input)
+        lstm_input = conv_output.view(batch_size, time_steps, -1)
+        lstm_output = self.Lstm(lstm_input)
+        lstm_output = lstm_output[:, -1, :]
+        output = self.output_layer(lstm_output)
+        return output
+```
+
+模型结构图如下：
+
+![](result/ResNetLstm.png)
 
 ### 训练方法
 
@@ -314,7 +451,8 @@ def train(model, train_data, loss_fn, optimizer, epochs, device, save_last_weigh
         val_loss, val_acc = evaluate(model, validation_data, loss_fn, device)
         # 打印训练损失和准确率
         print(
-            f'epoch: {epoch}, train_accuracy: {train_accuracy:.2f}, loss: {train_loss:.3f}, val_accuracy: {val_acc:.2f}, val_loss: {val_loss:.3f}')
+            f'epoch: {epoch}, train_accuracy: {train_accuracy:.2f}, loss: {train_loss:.3f}, 
+            val_accuracy: {val_acc:.2f}, val_loss: {val_loss:.3f}')
 
         if save_best_weights_path:
             if val_loss < best_loss:
@@ -335,6 +473,14 @@ def train(model, train_data, loss_fn, optimizer, epochs, device, save_last_weigh
 
 ## 训练过程 & 调参实验及结果
 
+三种模型中，训练效果最好的分别为：
+
+| 模型           | 训练次数  | 训练轮数 | 测试集Loss | 测试集Acc | 训练集Loss | 训练集Acc |
+|--------------|-------|------|---------|--------|---------|--------|
+| 调用预训练CNN的模型  | 第一次训练 | 70   | 1.668   | 0.820  | 1.588   | 0.885  |
+| 自定义的普通CNN的模型 | 第五次训练 | 120  | 1.730   | 0.750  | 1.523   | 0.945  |
+| 自定义的ResNet模型 | 第四次训练 | 70   | 1.893   | 0.580  | 1.499   | 0.968  |
+
 ### 主要参数说明
 
 在训练过程中不变的参数设置和说明如下：
@@ -345,6 +491,7 @@ def train(model, train_data, loss_fn, optimizer, epochs, device, save_last_weigh
 | batch_size  | 4    | 每个batch的大小 |
 | num_workers | 4    | 数据加载器的线程数  |
 | device      | cuda | 训练设备       |
+| epochs      | 70   | 训练的轮数      |
 
 与训练过程相关的参数说明如下：
 
@@ -372,13 +519,15 @@ def train(model, train_data, loss_fn, optimizer, epochs, device, save_last_weigh
 | num_lstm_layers | 2          |
 | learning_rate   | 2e-5       |
 
-训练过程如下：
+训练过程和评估结果如下：
 
-![](auto_coding-master/model/distilgpt2_fine_tuned_coder_1/train_loss.png)
+![](result/PretrainedConvLSTM-1.png)
 
-评估结果如下：
+测试集：Loss:  1.668, Acc:  0.820
 
-![](auto_coding-master/model/distilgpt2_fine_tuned_coder_1/dev_eval_scores.png)
+训练集：Loss:  1.588, Acc:  0.885
+
+训练时长：24 min 38 s
 
 #### 第二次训练
 
@@ -393,13 +542,15 @@ def train(model, train_data, loss_fn, optimizer, epochs, device, save_last_weigh
 | num_lstm_layers | 2        |
 | learning_rate   | 2e-5     |
 
-训练过程如下：
+训练过程和评估结果如下：
 
-![](auto_coding-master/model/distilgpt2_fine_tuned_coder_2/train_loss.png)
+![](result/PretrainedConvLSTM-2.png)
 
-评估结果如下：
+测试集：Loss:  1.903, Acc:  0.560
 
-![](auto_coding-master/model/distilgpt2_fine_tuned_coder_2/dev_eval_scores.png)
+训练集：Loss:  1.844, Acc:  0.647
+
+训练时长：17 min 27 s
 
 #### 第三次训练
 
@@ -414,15 +565,347 @@ def train(model, train_data, loss_fn, optimizer, epochs, device, save_last_weigh
 | num_lstm_layers | 2        |
 | learning_rate   | 2e-5     |
 
-训练过程如下：
+训练过程和评估结果如下：
 
-![](auto_coding-master/model/distilgpt2_fine_tuned_coder_3/train_loss.png)
+![](result/PretrainedConvLSTM-3.png)
 
-评估结果如下：
+测试集：Loss:  1.928, Acc:  0.570
 
-![](auto_coding-master/model/distilgpt2_fine_tuned_coder_3/dev_eval_scores.png)
+训练集：Loss:  1.870, Acc:  0.640
+
+训练时长：13 min 49 s
+
+#### 第四次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 15         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-4       |
+
+训练过程和评估结果如下：
+
+![](result/PretrainedConvLSTM-4.png)
+
+测试集：Loss:  2.295, Acc:  0.090
+
+训练集：Loss:  2.222, Acc:  0.212
+
+训练时长：24 min 32 s
 
 #### 对比
 
+| 参数名             | 第一次训练       | 第二次训练       | 第三次训练       | 第四次训练       |
+|-----------------|-------------|-------------|-------------|-------------|
+| num_frames      | 15          | 20          | 20          | 15          |
+| img_size        | (128, 128)  | (64, 64)    | (64, 64)    | (128, 128)  |
+| latent_dim      | 2048        | 2048        | 1024        | 2048        |
+| hid_size        | 128         | 128         | 64          | 128         |
+| num_lstm_layers | 2           | 2           | 2           | 2           |
+| learning_rate   | 2e-5        | 2e-5        | 2e-5        | 2e-4        |
+| 测试集Loss         | 1.668       | 1.903       | 1.928       | 2.295       |
+| 测试集Acc          | 0.820       | 0.560       | 0.570       | 0.090       |
+| 训练集Loss         | 1.588       | 1.844       | 1.870       | 2.222       |
+| 训练集Acc          | 0.885       | 0.647       | 0.640       | 0.212       |
+| 训练时长            | 24 min 38 s | 17 min 27 s | 13 min 49 s | 24 min 32 s |
+
+**对比第一次训练和第二次训练：**
+
+修改参数：
+
+- num_frames：15 $ \rightarrow $ 20
+- img_size：(128, 128) $ \rightarrow $ (64, 64)
+
+第一次训练的训练集、测试集准确率远高于第二次训练，但训练时长较长，说明输入视频的帧数和图像的像素大小对模型的训练效果有较大影响。
+
+**对比第二次训练和第三次训练：**
+
+修改参数：
+
+- latent_dim：2048 $ \rightarrow $ 1024
+- hid_size：128 $ \rightarrow $ 64
+
+第二次训练的训练集、测试集准确率与第三次训练相当，但训练时长较长，说明 CNN 的输出维度和 LSTM 的隐藏层维度对模型的训练效果影响不大。
+
+**对比第一次训练和第四次训练：**
+
+修改参数：
+
+- learning_rate：2e-5 $ \rightarrow $ 2e-4
+
+两次训练的时长相同，但第一次训练的训练集、测试集准确率远高于第四次训练，说明在当前模型结构下，学习率为 2e-5 的效果更好。
+
 ### 调用自行定义的普通CNN的模型训练过程及结果
 
+#### 第一次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 15         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-4       |
+
+训练过程和评估结果如下：
+
+![](result/ConvLSTM-1.png)
+
+测试集：Loss:  1.831, Acc:  0.640
+
+训练集：Loss:  1.587, Acc:  0.875
+
+训练时长：31 min 14 s
+
+#### 第二次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 15         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-5       |
+
+训练过程和评估结果如下：
+
+![](result/ConvLSTM-2.png)
+
+测试集：Loss:  1.883, Acc:  0.610
+
+训练集：Loss:  1.660, Acc:  0.825
+
+训练时长：31 min 24 s
+
+#### 第三次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 15         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 3          |
+| learning_rate   | 2e-5       |
+
+训练过程和评估结果如下：
+
+![](result/ConvLSTM-3.png)
+
+测试集：Loss:  1.952, Acc:  0.530
+
+训练集：Loss:  1.735, Acc:  0.735
+
+训练时长：33 min 41 s
+
+#### 第四次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 15         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 1e-5       |
+
+训练过程和评估结果如下：
+
+![](result/ConvLSTM-4.png)
+
+测试集：Loss:  1.966, Acc:  0.520
+
+训练集：Loss:  1.754, Acc:  0.738
+
+训练时长：33 min 41 s
+
+#### 第五次训练
+
+通过观察发现第二次训练随着训练轮数的增加，训练的效果在不断上升，因此采用与第二次相近的训练参数（将 num_frames 由 15 改为
+20），将训练轮数更改为 120，以使自定义模型达到精度要求。
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 20         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-5       |
+
+训练过程和评估结果如下：
+
+![](result/ConvLSTM-5.png)
+
+测试集：Loss:  1.730, Acc:  0.750
+
+训练集：1.523, Acc:  0.945
+
+训练时长：62 min
+
+#### 对比
+
+| 参数名             | 第一次训练       | 第二次训练       | 第三次训练       | 第四次训练       | 第五次训练      |
+|-----------------|-------------|-------------|-------------|-------------|------------|
+| num_frames      | 15          | 15          | 15          | 15          | 20         |
+| img_size        | (128, 128)  | (128, 128)  | (128, 128)  | (128, 128)  | (128, 128) |
+| latent_dim      | 2048        | 2048        | 2048        | 2048        | 2048       |
+| hid_size        | 128         | 128         | 128         | 128         | 128        |
+| num_lstm_layers | 2           | 2           | 3           | 2           | 2          |
+| learning_rate   | 2e-4        | 2e-5        | 2e-5        | 1e-5        | 2e-5       |
+| 测试集Loss         | 1.831       | 1.883       | 1.952       | 1.966       | 1.730      |
+| 测试集Acc          | 0.640       | 0.610       | 0.530       | 0.520       | 0.750      |
+| 训练集Loss         | 1.587       | 1.660       | 1.735       | 1.754       | 1.523      |
+| 训练集Acc          | 0.875       | 0.825       | 0.735       | 0.738       | 0.945      |
+| 训练时长            | 31 min 14 s | 31 min 24 s | 33 min 41 s | 33 min 41 s | 62 min     |
+
+**对比第一次、第二次、第四次训练：**
+
+这三次训练均只修改了学习率，三次训练时间相近，第一次和第二次的训练效果优于第三次。
+
+第一次的训练准确度在 20 轮之后趋于稳定，第二次的训练准确度随着训练次数的增加在不断上升，说明在自定义的模型下，学习率为 2e-4
+训练更快，但是存在瓶颈，而学习率为 2e-5 的训练效果更好。
+
+**对比第二次、第三次训练：**
+
+修改参数：
+
+- num_lstm_layers：2 $ \rightarrow $ 3
+
+两次训练时间相近，第二次的训练准确度优于第三次。
+
+### 使用自定义的ResNet和LSTM构建模型训练过程及结果
+
+#### 第一次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 20         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-5       |
+
+训练过程和评估结果如下：
+
+![](result/ResNetLSTM-1.png)
+
+测试集：Loss:  2.062, Acc:  0.410
+
+训练集：Loss:  1.769, Acc:  0.705
+
+训练时长：33 min 41 s
+
+#### 第二次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 20         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-6       |
+
+训练过程和评估结果如下：
+
+![](result/ResNetLSTM-2.png)
+
+测试集：Loss:  2.245, Acc:  0.190
+
+训练集：Loss:  2.196, Acc:  0.300
+
+训练时长：56 min 8 s
+
+#### 第三次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 20         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 2e-4       |
+
+训练过程和评估结果如下：
+
+![](result/ResNetLSTM-3.png)
+
+测试集：Loss:  2.080, Acc:  0.360
+
+训练集：Loss:  1.820, Acc:  0.637
+
+训练时长：55 min 54 s
+
+#### 第四次训练
+
+参数设置如下：
+
+| 参数名             | 参数值        |
+|-----------------|------------|
+| num_frames      | 20         |
+| img_size        | (128, 128) |
+| latent_dim      | 2048       |
+| hid_size        | 128        |
+| num_lstm_layers | 2          |
+| learning_rate   | 5e-5       |
+
+训练过程和评估结果如下：
+
+![](result/ResNetLSTM-4.png)
+
+测试集：Loss:  1.893, Acc:  0.580
+
+训练集：Loss:  1.499, Acc:  0.968
+
+训练时长：55 min 58 s
+
+#### 对比
+
+| 参数名           | 第一次训练       | 第二次训练       | 第三次训练       | 第四次训练       |
+|---------------|-------------|-------------|-------------|-------------|
+| learning_rate | 2e-5        | 2e-6        | 2e-4        | 5e-5        |
+| 测试集Loss       | 2.062       | 2.245       | 2.080       | 1.893       |
+| 测试集Acc        | 0.410       | 0.190       | 0.360       | 0.580       |
+| 训练集Loss       | 1.769       | 2.196       | 1.820       | 1.499       |
+| 训练集Acc        | 0.705       | 0.300       | 0.637       | 0.968       |
+| 训练时长          | 33 min 41 s | 55 min 10 s | 55 min 54 s | 55 min 58 s |
+
+四次训练均只改变了学习率，通过观察发现在学习率为 5e-5 时，训练集准确率达到 0.968，测试集准确率达到 0.580，均为最高，因此在自定义的
+ResNetLSTM 模型下，学习率为 5e-5 的效果最好。
+
+采用残差网络的 ResNetLSTM 模型在训练集上的准确率均远大于测试集，训练效果也并不好，说明该模型的结构存在问题，也存在过拟合现象，导致准确率低于使用普通
+CNN 的模型。
+
+### 视频分类效果展示
+
+在分类时使用第五次训练的自定义CNN模型进行分类任务，通过运行 classify.py 文件，可以对指定的视频进行分类。
+
+一次样例运行结果如下：
+
+![img.png](classify_exampe.png)
